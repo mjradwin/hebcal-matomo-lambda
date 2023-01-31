@@ -2,8 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -24,7 +30,6 @@ type EventDetails struct {
 	Category string
 	Action   string
 	Name     string
-	Label    string
 }
 
 type TrackingMessage struct {
@@ -44,9 +49,91 @@ type TrackingMessage struct {
 func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 	for _, message := range sqsEvent.Records {
 		fmt.Printf("The message %s for event source %s = %s \n", message.MessageId, message.EventSource, message.Body)
-		var trackingMsg TrackingMessage
-		json.Unmarshal([]byte(message.Body), &trackingMsg)
-		fmt.Println(trackingMsg)
+		var msg TrackingMessage
+		json.Unmarshal([]byte(message.Body), &msg)
+
+		client := &http.Client{}
+		req, err := http.NewRequest("GET", "http://www.hebcal.com/ma/ma.php", nil)
+		if err != nil {
+			return err
+		}
+
+		q := req.URL.Query()
+		q.Add("rec", "1")
+		q.Add("apiv", "1")
+		q.Add("idsite", "4")
+		q.Add("send_image", "0") // prefer HTTP 204 instead of a GIF image
+		q.Add("lang", msg.Locale)
+
+		actionName := msg.IntentName
+		if actionName == "" {
+			actionName = msg.RequestType
+		}
+		q.Add("action_name", actionName)
+		path := "http://alexa.hebcal.com/" + actionName
+		for slot, val := range msg.Slots {
+			path += "/" + slot + "/" + val
+		}
+		q.Add("url", path)
+
+		if msg.UserId != "" {
+			data := []byte(msg.UserId)
+			bytes := md5.Sum(data)
+			bytes[6] = (bytes[6] & 0x0f) | 0x40
+			bytes[8] = (bytes[8] & 0x3f) | 0x80
+			uid := fmt.Sprintf("%x-%x-%x-%x-%x",
+				bytes[0:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:16])
+			q.Add("uid", uid)
+			vid := fmt.Sprintf("%x%x", bytes[0:2], bytes[10:16])
+			q.Add("_id", vid)
+			q.Add("cid", vid)
+		}
+
+		if msg.Details != nil {
+			evt := msg.Details
+			if evt.Category != "" {
+				q.Add("e_c", evt.Category)
+			}
+			if evt.Action != "" {
+				q.Add("e_a", evt.Action)
+			}
+			if evt.Name != "" {
+				q.Add("e_n", evt.Name)
+			}
+		}
+
+		matomoToken := os.Getenv("MATOMO_TOKEN")
+		if matomoToken != "" && msg.Location != nil {
+			q.Add("token_auth", matomoToken)
+			loc := msg.Location
+			if loc.Cc != "" {
+				q.Add("country", strings.ToLower(loc.Cc))
+			}
+			cityName := loc.Name
+			if cityName == "" {
+				cityName = loc.CityName
+			}
+			if cityName != "" {
+				q.Add("city", cityName)
+			}
+			q.Add("lat", fmt.Sprintf("%f", loc.Latitude))
+			q.Add("long", fmt.Sprintf("%f", loc.Longitude))
+		}
+
+		req.URL.RawQuery = q.Encode()
+
+		fmt.Println(req.URL.String())
+
+		req.Header.Add("User-Agent", msg.Client)
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 204 {
+			return errors.New("Unexpected status code " + strconv.Itoa(resp.StatusCode))
+		}
 	}
 
 	return nil
