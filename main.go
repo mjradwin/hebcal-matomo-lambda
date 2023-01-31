@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -48,9 +49,11 @@ type TrackingMessage struct {
 
 func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 	for _, message := range sqsEvent.Records {
-		fmt.Printf("The message %s for event source %s = %s \n", message.MessageId, message.EventSource, message.Body)
 		var msg TrackingMessage
 		json.Unmarshal([]byte(message.Body), &msg)
+
+		fmt.Printf("sqsMessageId=%s,requestType=%s,requestId=%s,intent=%s,userId=%s\n",
+			message.MessageId, msg.RequestType, msg.RequestId, msg.IntentName, msg.UserId)
 
 		client := &http.Client{}
 		req, err := http.NewRequest("GET", "http://www.hebcal.com/ma/ma.php", nil)
@@ -72,7 +75,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 		q.Add("action_name", actionName)
 		path := "http://alexa.hebcal.com/" + actionName
 		for slot, val := range msg.Slots {
-			path += "/" + slot + "/" + val
+			path += "/" + slot + "/" + url.QueryEscape(val)
 		}
 		q.Add("url", path)
 
@@ -125,6 +128,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 		fmt.Println(req.URL.String())
 
 		req.Header.Add("User-Agent", msg.Client)
+		req.Header.Add("X-Forwarded-Proto", "https")
 		resp, err := client.Do(req)
 		if err != nil {
 			return err
