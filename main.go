@@ -112,6 +112,9 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 			if loc.Cc != "" {
 				q.Add("country", strings.ToLower(loc.Cc))
 			}
+			if loc.State != "" {
+				q.Add("region", loc.State)
+			}
 			cityName := loc.Name
 			if cityName == "" {
 				cityName = loc.CityName
