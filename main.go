@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/md5"
+	b64 "encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/twmb/murmur3"
 )
 
 type UserLocation struct {
@@ -63,6 +65,19 @@ func getActionName(msg TrackingMessage) string {
 	return getItentName(msg)
 }
 
+func getPageviewId(requestId string) string {
+	hash := murmur3.StringSum32(requestId)
+	bytes := make([]byte, 4)
+	bytes[0] = byte(hash & 0xff)
+	bytes[1] = byte((hash >> 8) & 0xff)
+	bytes[2] = byte((hash >> 16) & 0xff)
+	bytes[3] = byte((hash >> 24) & 0xff)
+	str := b64.RawURLEncoding.EncodeToString(bytes)
+	str = strings.ReplaceAll(str, "-", "x")
+	str = strings.ReplaceAll(str, "_", "y")
+	return str
+}
+
 func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 	for _, message := range sqsEvent.Records {
 		var msg TrackingMessage
@@ -83,6 +98,10 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 		q.Add("idsite", "4")
 		q.Add("send_image", "0") // prefer HTTP 204 instead of a GIF image
 		q.Add("lang", msg.Locale)
+
+		if msg.RequestId != "" {
+			q.Add("pv_id", getPageviewId(msg.RequestId))
+		}
 
 		if msg.Duration != 0 {
 			q.Add("pf_srv", strconv.Itoa(msg.Duration))
