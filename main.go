@@ -42,9 +42,25 @@ type TrackingMessage struct {
 	UserId      string
 	Locale      string
 	IntentName  string
+	Duration    int
+	Title       string
 	Slots       map[string]string `json:"slots,omitempty"`
 	Location    *UserLocation     `json:"location,omitempty"`
 	Details     *EventDetails     `json:"details,omitempty"`
+}
+
+func getItentName(msg TrackingMessage) string {
+	if msg.IntentName != "" {
+		return msg.IntentName
+	}
+	return msg.RequestType
+}
+
+func getActionName(msg TrackingMessage) string {
+	if msg.Title != "" {
+		return msg.Title
+	}
+	return getItentName(msg)
 }
 
 func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
@@ -68,12 +84,14 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 		q.Add("send_image", "0") // prefer HTTP 204 instead of a GIF image
 		q.Add("lang", msg.Locale)
 
-		actionName := msg.IntentName
-		if actionName == "" {
-			actionName = msg.RequestType
+		if msg.Duration != 0 {
+			q.Add("pf_srv", strconv.Itoa(msg.Duration))
 		}
+
+		actionName := getActionName(msg)
 		q.Add("action_name", actionName)
-		path := "http://alexa.hebcal.com/" + actionName
+
+		path := "http://alexa.hebcal.com/" + getItentName(msg)
 		for slot, val := range msg.Slots {
 			path += "/" + slot + "/" + url.QueryEscape(val)
 		}
