@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -149,8 +150,19 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 			if loc.Cc != "" {
 				q.Add("country", strings.ToLower(loc.Cc))
 			}
-			if loc.State != "" {
-				q.Add("region", loc.State)
+			if loc.Cc == "US" {
+				if loc.State != "" {
+					q.Add("region", loc.State)
+				} else if loc.CityName != "" {
+					re := regexp.MustCompile(`, [A-Z][A-Z]$`)
+					cityName := loc.CityName
+					if re.MatchString(cityName) {
+						length := len(cityName)
+						state := cityName[length-2 : length]
+						q.Add("region", state)
+						loc.Name = cityName[0 : length-4]
+					}
+				}
 			}
 			cityName := loc.Name
 			if cityName == "" {
